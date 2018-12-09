@@ -1,0 +1,24 @@
+{
+  "name": "protobi-node-sdk",
+  "version": "1.0.0",
+  "description": "Protobi REST API library for Node.js",
+  "main": "js/protobi-rest-api.js",
+  "scripts": {
+    "test": "mocha"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/protobi/protobi-node-sdk.git"
+  },
+  "author": "Pieter Sheth-Voss",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/protobi/protobi-node-sdk/issues"
+  },
+  "homepage": "https://github.com/protobi/protobi-node-sdk#readme",
+  "dependencies": {
+    "csv": "^4.0.0",
+    "dotenv": "^6.2.0",
+    "request": "^2.88.0"
+  }
+}
