@@ -73,7 +73,7 @@ To upload SAV data, use `content-type: "'application/octet-stream'"`
 * @param: `datasetId`  unique identifier for dataset
 * Returns:  Elements configuration in JSON format
 
-####Example (jQuery):   
+#### Example (jQuery):   
 
       $.ajax({
             type: "GET",
@@ -99,7 +99,7 @@ To upload SAV data, use `content-type: "'application/octet-stream'"`
 * @param: `datasetId`  unique identifier for dataset
 * Returns:  Elements configuration in JSON format
 
-####Example (jQuery):  
+#### Example (jQuery):  
 
       $.ajax({
             type: "POST",
