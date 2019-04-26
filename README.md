@@ -14,6 +14,13 @@ calling the REST API for a specific project.
 Authenticate either by secure cookie or API Key.   
 To login via API key, append `?apiKey=<YOUR_API_KEY>` to the URL as a query parameter. 
 
+Your API key can be obtained at https://app.protobi.com/account  
+(or if you have Protobi Enterprise, use https://yourdomain.protobi.com/account ).
+
+
+Keep the API confidential, it provides access to your projects as if you had logged in.
+    
+
 ### Download data file
 
 * Method: `GET`
@@ -140,52 +147,49 @@ In Node.js require the library and initialize it for a specific host and API key
 ## Node.js API
 
 
+```js
+/**
+ * Save array of Element objects to a project
+ * @param elements
+ * @param datasetId
+ * @param callback
+ */
+uploadElements: function ( elements, datasetId, callback) {...},
 
-    /**
-     * Save array of Element objects to a project
-     * @param elements
-     * @param datasetId
-     * @param callback
-     */
-    uploadElements: function ( elements, datasetId, callback) {...},
-    
-    
-    /**
-     * Retrieve project configuration as an array of elements
-     * @param datasetId
-     * @param elements
-     * @param callback
-     */
-    getElements: function (datasetId, elements, callback) {...},
-    
-    /**
-     * Upload csv string to project data entry as a data file,
-     * @method upload_csv
-     */
-    uploadCsv: function (csv, datasetId, dataKey, filename, callback) {...},
-    
-    /**
-     * Download csv string to project data entry as a data file,
-     * @method upload_csv
-     */
-    
-    downloadCsv: function (url, callback) {...},
-    
-    uploadData: function (rows, datasetId, dataKey,  filename, callback) { ... },
-    
-    /**
-     * Download
-     * @param datasetId
-     * @param dataKey
-     * @param rows
-     * @param filename
-     * @param callback
-     */
-    getData: function (datasetId, dataKey, rows, filename, callback) {...},
-    
-    removeProxy:function() {...}
-  }
-}
+
+/**
+ * Retrieve project configuration as an array of elements
+ * @param datasetId
+ * @param elements
+ * @param callback
+ */
+getElements: function (datasetId, elements, callback) {...},
+
+/**
+ * Upload csv string to project data entry as a data file,
+ * @method upload_csv
+ */
+uploadCsv: function (csv, datasetId, dataKey, filename, callback) {...},
+
+/**
+ * Download csv string to project data entry as a data file,
+ * @method upload_csv
+ */
+
+downloadCsv: function (url, callback) {...},
+
+uploadData: function (rows, datasetId, dataKey,  filename, callback) { ... },
+
+/**
+ * Download
+ * @param datasetId
+ * @param dataKey
+ * @param rows
+ * @param filename
+ * @param callback
+ */
+getData: function (datasetId, dataKey, rows, filename, callback) {...},
+```    
 
 
 
@@ -193,46 +197,47 @@ In Node.js require the library and initialize it for a specific host and API key
 ## Node.js API examples
 
 #### Upload elements
+```js
+var elements = [
+   {
+        key: "$root",
+        children: ["fruit","color"]
+   },
+   {
+        key: "fruit",
+        title: "Name of fruit",
+        type: "string"
+   },
+   {
+        key: "color",
+        title: "Color",
+        type: "string"
+   }
+}
 
-    var elements = [
-       {
-            key: "$root",
-            children: ["fruit","color"]
-       },
-       {
-            key: "fruit",
-            title: "Name of fruit",
-            type: "string"
-       },
-       {
-            key: "color",
-            title: "Color",
-            type: "string"
-       }
-    }
-    
-    protobiAPI.uploadElements(elements, PROTOBI_PROJECT_ID, function (err) {
-      if (err) return callback(err);
-      console.log("ELEMENTS uploaded")   
-    })
-        
+protobiAPI.uploadElements(elements, PROTOBI_PROJECT_ID, function (err) {
+  if (err) return callback(err);
+  console.log("ELEMENTS uploaded")   
+})
+```  
     
 #### Upload data
     
-    // example data
-    var data = [
-       { fruit: "Apple", "color": "red",
-         fruit: "Banana", "color": "yellow",
-         fruit: "Cherry", "color": "red",
-         fruit: "Date", "color": "brown"
-       }
-    ]
-    
-    
-    protobiAPI.uploadData(data, PROTOBI_PROJECT_ID, "main", null, function (err) {
-      if (err) return callback(err);
-      console.log("DATA uploaded")
-    })
-   
+```js
+// example data
+var data = [
+   { fruit: "Apple", "color": "red",
+     fruit: "Banana", "color": "yellow",
+     fruit: "Cherry", "color": "red",
+     fruit: "Date", "color": "brown"
+   }
+]
+
+
+protobiAPI.uploadData(data, PROTOBI_PROJECT_ID, "main", null, function (err) {
+  if (err) return callback(err);
+  console.log("DATA uploaded")
+})
+```
 
 

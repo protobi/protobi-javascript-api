@@ -1,6 +1,6 @@
 {
   "name": "protobi-node-sdk",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Protobi REST API library for Node.js",
   "main": "js/protobi-rest-api.js",
   "scripts": {

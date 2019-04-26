@@ -29,13 +29,15 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
      * @param callback
      */
     uploadElements: function ( elements, datasetId, callback) {
-      var url = PROTOBI_API_URL + "/v3/datasets/" + datasetId + "/element";
+      var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId + "/element";
       url += "?apiKey=" + PROTOBI_API_KEY;
+      console.log(elements.length)
+      console.log(url)
       request({
             url: url,
             method: "POST",
             body: elements,
-            json: elements,
+            json: true,
             rejectUnauthorized: false,
             requestCert: true,
             agent: false
@@ -54,7 +56,7 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
      * @param elements
      * @param callback
      */
-    getElements: function (datasetId, elements, callback) {
+    getElements: function (datasetId, callback) {
       var url = PROTOBI_API_URL + "/v3/datasets/" + datasetId + "/element";
       url += "?apiKey=" + PROTOBI_API_KEY;
       request({
@@ -94,6 +96,7 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
         return callback(err, body)
       });
       var form = req.form();
+      form.append('type','data')
       form.append('file', csv, {
         filename: filename,
         contentType: 'text/csv'
