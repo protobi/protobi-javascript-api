@@ -23,9 +23,9 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
 
     /**
      * Save array of Element objects to a project
-     * @param elements
-     * @param datasetId
-     * @param callback
+     * @param elements   Array of element objects
+     * @param datasetId  Id of existing project
+     * @param callback   function(err, elements)
      */
     uploadElements: function (elements, datasetId, callback) {
       var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId + "/element";
@@ -51,9 +51,8 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
 
     /**
      * Retrieve project configuration as an array of elements
-     * @param datasetId
-     * @param elements
-     * @param callback
+     * @param datasetId     Id of existing project
+     * @param callback      function(err, elements)
      */
     getElements: function (datasetId, callback) {
       var url = PROTOBI_API_URL + "/v3/datasets/" + datasetId + "/element";
