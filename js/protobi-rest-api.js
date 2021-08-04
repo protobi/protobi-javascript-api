@@ -111,6 +111,7 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
         callback = options
         options = {}
       }
+
       var req = request.get({
             url: url,
             rejectUnauthorized: false,
@@ -140,7 +141,7 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
      * @param dataKey
      * @param rows
      * @param filename
-     * @param callback
+     * @param callback function(err, rows)
      */
     getData: function (datasetId, dataKey, callback) {
       var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId + "/data/" + dataKey + "/csv";

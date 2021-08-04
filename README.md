@@ -7,6 +7,11 @@ This page also documents the Protobi Node.js SDK which simplifies
 calling the REST API for a specific project.
 
 
+## Installation
+
+
+`npm install github:protobi/protobi-javascript-api`
+
 
 ## REST API
 
@@ -126,14 +131,10 @@ To upload SAV data, use `content-type: "'application/octet-stream'"`
 
 ## Node.js API 
 
-## Installation
-
-
-`npm install github:protobi/protobi-node-sdk`
 
 In Node.js require the library and initialize it for a specific host and API key
 
-    var ProtobiAPI = require('./js/protobi-rest-api')
+    var ProtobiAPI = require('./js/protobi-javascript-api')
 
     var PROTOBI_URL = "https://app.protobi.com"
     var PROTOBI_API_KEY = "c1001580-56f4-400e-a210-212d03309e80"
@@ -186,9 +187,9 @@ uploadData: function (rows, datasetId, dataKey,  filename, callback) { ... },
  * @param dataKey
  * @param rows
  * @param filename
- * @param callback
+ * @param callback function(err, rows)
  */
-getData: function (datasetId, dataKey, rows, filename, callback) {...},
+getData: function (datasetId, dataKey, callback) {...},
 ```    
 
 
