@@ -8,14 +8,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/protobi/protobi-node-sdk.git"
+    "url": "git+https://github.com/protobi/protobi-javascript-api.git"
   },
   "author": "Pieter Sheth-Voss",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/protobi/protobi-node-sdk/issues"
+    "url": "https://github.com/protobi/protobi-javascript-api/issues"
   },
-  "homepage": "https://github.com/protobi/protobi-node-sdk#readme",
+  "homepage": "https://github.com/protobi/protobi-javascript-api#readme",
   "dependencies": {
     "csv": "^5.1.3",
     "dotenv": "^6.2.0",
