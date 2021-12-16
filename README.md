@@ -242,3 +242,7 @@ protobiAPI.uploadData(data, PROTOBI_PROJECT_ID, "main", null, function (err) {
 ```
 
 
+## Update
+All functions return a Promise if no callback method is specified.
+This allows functions to be used with **async await**.
+
