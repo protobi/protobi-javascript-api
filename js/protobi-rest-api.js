@@ -4,8 +4,8 @@
  * @param PROTOBI_API_KEY
  * @returns {
  * {
- *  upload_elements: upload_elements, 
- *  uploadCsv: uploadCsv, 
+ *  upload_elements: upload_elements,
+ *  uploadCsv: uploadCsv,
  *  upload_data: upload_data}
  *  }
  * @constructor
@@ -20,6 +20,15 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
 
   return {
 
+    initialize: function() {
+      for (var key in this) {
+        if (typeof this[key] == 'function') {
+          this[key]= this[key].bind(this)
+        }
+      }
+      return this;
+    },
+
 
     /**
      * Save array of Element objects to a project
@@ -28,10 +37,17 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
      * @param callback   function(err, elements)
      */
     uploadElements: function (elements, datasetId, callback) {
+      var self = this;
+      if (!callback) {
+        return new Promise(function(resolve, reject) {
+          self.uploadElements(elements, datasetId, function (err, result) {
+            if (err) reject(err)
+            else resolve(result)
+          })
+        })
+      }
       var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId + "/element";
       url += "?apiKey=" + PROTOBI_API_KEY;
-      console.log(elements.length)
-      console.log(url)
       request({
             url: url,
             method: "POST",
@@ -55,6 +71,15 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
      * @param callback      function(err, elements)
      */
     getElements: function (datasetId, callback) {
+      var self = this;
+      if (!callback) {
+        return new Promise(function(resolve, reject) {
+          self.getElements(datasetId, function (err, result) {
+            if (err) reject(err)
+            else resolve(result)
+          })
+        })
+      }
       var url = PROTOBI_API_URL + "/v3/datasets/" + datasetId + "/element";
       url += "?apiKey=" + PROTOBI_API_KEY;
       request({
@@ -76,6 +101,15 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
      * @method upload_csv
      */
     uploadCsv: function (csv, datasetId, dataKey, filename, callback) {
+      var self = this;
+      if (!callback) {
+        return new Promise(function(resolve, reject) {
+          self.uploadCsv(csv, datasetId, dataKey, filename,  function (err, result) {
+            if (err) reject(err)
+            else resolve(result)
+          })
+        })
+      }
       var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId + "/data/" + dataKey;
       url += "?apiKey=" + PROTOBI_API_KEY;
       console.log(url)
@@ -107,9 +141,18 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
      */
 
     downloadCsv: function (url, options, callback) {
+      var self = this;
       if (typeof options == 'function') {
         callback = options
         options = {}
+      }
+      if (!callback) {
+        return new Promise(function(resolve, reject) {
+          self.downloadCsv(url, options, function (err, result) {
+            if (err) reject(err)
+            else resolve(result)
+          })
+        })
       }
 
       var req = request.get({
@@ -127,7 +170,17 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
     },
 
     uploadData: function (rows, datasetId, dataKey, filename, callback) {
+
       var self = this;
+      if (!callback) {
+        return new Promise(function(resolve, reject) {
+          self.uploadData(rows, datasetId, dataKey, filename,  function (err, result) {
+            if (err) reject(err)
+            else resolve(result)
+          })
+        })
+      }
+
       if (!filename) filename = datasetId + "_" + dataKey + ".csv";
       CSV.stringify(rows, {header: true}, function (err, csv) {
         if (err) return callback(err);
@@ -144,6 +197,15 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
      * @param callback function(err, rows)
      */
     getData: function (datasetId, dataKey, callback) {
+      var self = this;
+      if (!callback) {
+        return new Promise(function(resolve, reject) {
+          self.getData(datasetId, dataKey, function (err, result) {
+            if (err) reject(err)
+            else resolve(result)
+          })
+        })
+      }
       var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId + "/data/" + dataKey + "/csv";
       url += "?apiKey=" + PROTOBI_API_KEY;
 
@@ -159,7 +221,7 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
     removeProxy: function () {
       delete process.env.http_proxy; //process.env.FIXIE_URL;  // per http://stackoverflow.com/a/36085330/645715
     }
-  }
+  }.initialize()
 }
 
 ProtobiAPI.Elements = Elements;
