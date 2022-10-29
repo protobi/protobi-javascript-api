@@ -46,6 +46,7 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
           })
         })
       }
+
       var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId + "/element";
       url += "?apiKey=" + PROTOBI_API_KEY;
       request({
@@ -169,6 +170,18 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
           });
     },
 
+    /**
+     * Scans through all objects in an array and returns the superset of keys.
+     * This is useful when working with arrays that represent data files, as the first data row might not have entries for all data columns.
+     * @param rows
+     * @returns [String]
+     */
+    accumulate_keys: function(rows) {
+      var keySet = new Set()
+      rows.forEach(row=> Object.keys(row).forEach(key=>keySet.add(key)))
+      return Array.from(keySet)
+    },
+
     uploadData: function (rows, datasetId, dataKey, filename, callback) {
 
       var self = this;
@@ -181,8 +194,11 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
         })
       }
 
+      // the first row might not have all the columns, so scan all rows first
+      var colKeys = self.accumulate_keys(rows)
+
       if (!filename) filename = datasetId + "_" + dataKey + ".csv";
-      CSV.stringify(rows, {header: true}, function (err, csv) {
+      CSV.stringify(rows, {header: true, columns: colKeys}, function (err, csv) {
         if (err) return callback(err);
         return self.uploadCsv(csv, datasetId, dataKey, filename, callback)
       })
