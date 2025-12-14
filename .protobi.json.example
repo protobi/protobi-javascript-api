@@ -1,0 +1,6 @@
+{
+  "apiKey": "your-api-key-here",
+  "host": "https://app.protobi.com",
+  "datasetId": "your-dataset-id-here",
+  "table": "main"
+}
