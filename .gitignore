@@ -65,3 +65,5 @@ typings/
 .idea
 .examples
 .DS_Store
+config.json
+.protobi.json

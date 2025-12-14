@@ -1,10 +1,23 @@
 {
   "name": "protobi-javascript-api",
   "version": "1.2.1",
-  "description": "Protobi REST API library for Node.js",
+  "description": "Protobi REST API library and CLI for Node.js",
   "main": "js/protobi-rest-api.js",
+  "bin": {
+    "protobi": "./bin/cli.mjs"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
-    "test": "mocha"
+    "test": "npm run test:unit",
+    "test:unit": "mocha 'test/unit/**/*.test.mjs'",
+    "test:integration": "mocha test/rest.js",
+    "test:all": "mocha",
+    "generate-methods": "node scripts/generate-methods.js",
+    "generate-docs": "node scripts/generate-docs.js",
+    "generate": "npm run generate-methods && npm run generate-docs",
+    "sync-to-public": "bash scripts/sync-to-public.sh"
   },
   "repository": {
     "type": "git",
@@ -17,10 +30,20 @@
   },
   "homepage": "https://github.com/protobi/protobi-javascript-api#readme",
   "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^11.1.0",
     "csv": "^6.0.4",
-    "request": "^2.88.2"
+    "form-data": "^4.0.5",
+    "fs-extra": "^11.2.0",
+    "inquirer": "^9.2.12",
+    "lodash.merge": "^4.6.2",
+    "node-fetch": "^2.7.0",
+    "ora": "^7.0.1"
   },
   "devDependencies": {
-    "dotenv": "^10.0.0"
+    "chai": "^6.2.1",
+    "dotenv": "^10.0.0",
+    "mocha": "^11.7.5",
+    "sinon": "^21.0.0"
   }
 }
