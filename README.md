@@ -6,6 +6,12 @@ This package provides three ways to interact with the Protobi REST API:
 2. **Node.js Library** - For programmatic access from Node.js
 3. **REST API** - Direct HTTP access from any language/platform
 
+## Documentation
+
+- **[CLI Guide](docs/CLI_GUIDE.md)** - Complete command-line interface documentation
+- **[JavaScript API](docs/JS_API.md)** - Node.js library method reference
+- **[REST API](docs/REST_API.md)** - Direct HTTP endpoint documentation
+
 ## Installation
 
 ```bash
