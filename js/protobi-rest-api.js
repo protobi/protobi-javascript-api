@@ -56,7 +56,7 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
       var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId + "/element";
       url += "?apiKey=" + PROTOBI_API_KEY;
 
-      fetch(url, {
+      nodeFetch(url, {
         method: "POST",
         headers: {
           'Content-Type': 'application/json',
@@ -66,7 +66,6 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
         agent: httpsAgent
       })
       .then(function(response) {
-        console.log(response.status);
         if (!response.ok) {
           throw new Error('HTTP ' + response.status + ': ' + response.statusText);
         }
@@ -80,6 +79,179 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
       });
     },
 
+
+    /**
+     * Retrieve dataset metadata
+     * @param datasetId     Id of existing project
+     * @param callback      function(err, dataset)
+     */
+    getDataset: function (datasetId, callback) {
+      var self = this;
+      if (!callback) {
+        return new Promise(function(resolve, reject) {
+          self.getDataset(datasetId, function (err, result) {
+            if (err) reject(err)
+            else resolve(result)
+          })
+        })
+      }
+      var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId;
+      url += "?apiKey=" + PROTOBI_API_KEY;
+
+      nodeFetch(url, {
+        method: "GET",
+        headers: {
+          'x-api-key': PROTOBI_API_KEY
+        },
+        agent: httpsAgent
+      })
+      .then(function(response) {
+        if (!response.ok) {
+          throw new Error('HTTP ' + response.status + ': ' + response.statusText);
+        }
+        return response.json();
+      })
+      .then(function(body) {
+        callback(null, body);
+      })
+      .catch(function(err) {
+        callback(err);
+      });
+    },
+
+    /**
+     * Retrieve list of data tables (csvtables) for a dataset
+     * @param datasetId     Id of existing project
+     * @param callback      function(err, tables)
+     */
+    getDataTables: function (datasetId, callback) {
+      var self = this;
+      if (!callback) {
+        return new Promise(function(resolve, reject) {
+          self.getDataTables(datasetId, function (err, result) {
+            if (err) reject(err)
+            else resolve(result)
+          })
+        })
+      }
+      var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId + "/tables";
+      url += "?apiKey=" + PROTOBI_API_KEY;
+
+      nodeFetch(url, {
+        method: "GET",
+        headers: {
+          'x-api-key': PROTOBI_API_KEY
+        },
+        agent: httpsAgent
+      })
+      .then(function(response) {
+        if (!response.ok) {
+          throw new Error('HTTP ' + response.status + ': ' + response.statusText);
+        }
+        return response.json();
+      })
+      .then(function(body) {
+        callback(null, body);
+      })
+      .catch(function(err) {
+        callback(err);
+      });
+    },
+
+    /**
+     * Download raw CSV data for a table (for cloning)
+     * @param datasetId     Id of existing project
+     * @param dataKey       Key of data table to download
+     * @param callback      function(err, csvText)
+     */
+    downloadData: function (datasetId, dataKey, callback) {
+      var self = this;
+      if (!callback) {
+        return new Promise(function(resolve, reject) {
+          self.downloadData(datasetId, dataKey, function (err, result) {
+            if (err) reject(err)
+            else resolve(result)
+          })
+        })
+      }
+      var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId + "/data/" + dataKey + "/csv";
+      url += "?apiKey=" + PROTOBI_API_KEY;
+
+      nodeFetch(url, {
+        method: "GET",
+        headers: {
+          'x-api-key': PROTOBI_API_KEY
+        },
+        agent: httpsAgent
+      })
+      .then(function(response) {
+        if (!response.ok) {
+          throw new Error('HTTP ' + response.status + ': ' + response.statusText);
+        }
+        return response.text();
+      })
+      .then(function(csvText) {
+        callback(null, csvText);
+      })
+      .catch(function(err) {
+        callback(err);
+      });
+    },
+
+    /**
+     * Upload raw CSV text for a table (for cloning)
+     * @param csvText       CSV text data
+     * @param datasetId     Id of destination project
+     * @param dataKey       Key of data table
+     * @param filename      Original filename
+     * @param callback      function(err, result)
+     */
+    uploadCsvText: function (csvText, datasetId, dataKey, filename, callback) {
+      var self = this;
+      if (!callback) {
+        return new Promise(function(resolve, reject) {
+          self.uploadCsvText(csvText, datasetId, dataKey, filename, function (err, result) {
+            if (err) reject(err)
+            else resolve(result)
+          })
+        })
+      }
+      var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId + "/data/" + dataKey;
+      url += "?apiKey=" + PROTOBI_API_KEY;
+
+      var FormData = require('form-data');
+      var form = new FormData();
+
+      // Upload CSV as a file
+      form.append('file', Buffer.from(csvText, 'utf-8'), {
+        filename: filename || dataKey + '.csv',
+        contentType: 'text/csv'
+      });
+
+      nodeFetch(url, {
+        method: "POST",
+        headers: {
+          'x-api-key': PROTOBI_API_KEY,
+          ...form.getHeaders()
+        },
+        body: form,
+        agent: httpsAgent
+      })
+      .then(function(response) {
+        if (!response.ok) {
+          return response.text().then(function(text) {
+            throw new Error('HTTP ' + response.status + ': ' + text);
+          });
+        }
+        return response.json();
+      })
+      .then(function(body) {
+        callback(null, body);
+      })
+      .catch(function(err) {
+        callback(err);
+      });
+    },
 
     /**
      * Retrieve project configuration as an array of elements
@@ -99,7 +271,7 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
       var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId + "/element";
       url += "?apiKey=" + PROTOBI_API_KEY;
 
-      fetch(url, {
+      nodeFetch(url, {
         method: "GET",
         headers: {
           'x-api-key': PROTOBI_API_KEY
@@ -151,7 +323,7 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
       var checkUrl = PROTOBI_API_URL + "/api/v3/tasks/" + taskId + "/check?apiKey=" + PROTOBI_API_KEY;
 
       function poll() {
-        fetch(checkUrl, {
+        nodeFetch(checkUrl, {
           method: "GET",
           headers: {
             'x-api-key': PROTOBI_API_KEY
@@ -203,7 +375,6 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
       }
       var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId + "/data/" + dataKey;
       url += "?apiKey=" + PROTOBI_API_KEY;
-      console.log(url)
 
       // Create FormData for multipart upload
       var FormData = require('form-data');
@@ -262,7 +433,7 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
       var headers = options.headers || {};
       // fetch handles gzip automatically via Accept-Encoding
 
-      fetch(url, {
+      nodeFetch(url, {
         method: "GET",
         headers: headers,
         agent: httpsAgent
@@ -365,7 +536,7 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
       var url = PROTOBI_API_URL + "/api/v3/dataset";
       url += "?apiKey=" + PROTOBI_API_KEY;
 
-      fetch(url, {
+      nodeFetch(url, {
         method: "GET",
         headers: {
           'x-api-key': PROTOBI_API_KEY
@@ -396,7 +567,17 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
      * @param options   {name, description} - optional metadata
      * @param callback  function(err, dataset)
      */
-    createDataset: function (file, options, callback) {
+    /**
+     * Create a new dataset (metadata only, no data files)
+     *
+     * IMPORTANT: This method creates an EMPTY dataset with metadata only.
+     * To upload data files to an existing dataset, use uploadData() instead.
+     *
+     * @param datasetObject   Dataset metadata object {name, description, etc}
+     * @param options         Optional parameters (reserved for future use)
+     * @param callback        function(err, dataset)
+     */
+    createDataset: function (datasetObject, options, callback) {
       var self = this;
       if (typeof options === 'function') {
         callback = options
@@ -404,38 +585,24 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
       }
       if (!callback) {
         return new Promise(function(resolve, reject) {
-          self.createDataset(file, options, function (err, result) {
+          self.createDataset(datasetObject, options, function (err, result) {
             if (err) reject(err)
             else resolve(result)
           })
         })
       }
-      var url = PROTOBI_API_URL + "/v3/new/datafile/";
+
+      // Only support dataset objects - use API endpoint
+      var url = PROTOBI_API_URL + "/api/v3/dataset";
       url += "?apiKey=" + PROTOBI_API_KEY;
-
-      var FormData = require('form-data');
-      var form = new FormData();
-
-      // Add file
-      if (typeof file === 'string') {
-        // File path
-        form.append('file', require('fs').createReadStream(file));
-      } else {
-        // Buffer or stream
-        form.append('file', file, {
-          filename: options.filename || 'data.csv',
-          contentType: options.contentType || 'text/csv'
-        });
-      }
-
-      // Add optional metadata
-      if (options.name) form.append('name', options.name);
-      if (options.description) form.append('description', options.description);
 
       nodeFetch(url, {
         method: "POST",
-        headers: form.getHeaders(),
-        body: form,
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': PROTOBI_API_KEY
+        },
+        body: JSON.stringify(datasetObject),
         agent: httpsAgent
       })
       .then(function(response) {
@@ -444,7 +611,7 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
             throw new Error('HTTP ' + response.status + ': ' + text);
           });
         }
-        return response.json();  // Changed from text() to json() to handle task response
+        return response.json();
       })
       .then(function(body) {
         callback(null, body);
@@ -472,7 +639,7 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
       var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId;
       url += "?apiKey=" + PROTOBI_API_KEY;
 
-      fetch(url, {
+      nodeFetch(url, {
         method: "DELETE",
         headers: {
           'x-api-key': PROTOBI_API_KEY
@@ -514,7 +681,7 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
       var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId + "/data/" + dataKey;
       url += "?apiKey=" + PROTOBI_API_KEY;
 
-      fetch(url, {
+      nodeFetch(url, {
         method: "DELETE",
         headers: {
           'x-api-key': PROTOBI_API_KEY
@@ -557,7 +724,7 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
       var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId;
       url += "?apiKey=" + PROTOBI_API_KEY;
 
-      fetch(url, {
+      nodeFetch(url, {
         method: "GET",
         headers: {
           'x-api-key': PROTOBI_API_KEY
