@@ -30,18 +30,13 @@
   },
   "homepage": "https://github.com/protobi/protobi-javascript-api#readme",
   "dependencies": {
-    "chalk": "^5.3.0",
-    "commander": "^11.1.0",
     "csv": "^6.0.4",
     "form-data": "^4.0.5",
-    "fs-extra": "^11.2.0",
-    "inquirer": "^9.2.12",
-    "lodash.merge": "^4.6.2",
-    "node-fetch": "^2.7.0",
-    "ora": "^7.0.1"
+    "node-fetch": "^2.7.0"
   },
   "devDependencies": {
     "chai": "^6.2.1",
+    "commander": "^11.1.0",
     "dotenv": "^10.0.0",
     "mocha": "^11.7.5",
     "sinon": "^21.0.0"

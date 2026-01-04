@@ -15,7 +15,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import chalk from 'chalk';
+import { Command } from 'commander';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,71 +25,39 @@ const apiPath = path.resolve(__dirname, '../js/protobi-rest-api.js');
 const ProtobiAPI = await import(apiPath).then(m => m.default || m);
 
 /**
- * Parse command line arguments
+ * Parse command line arguments using commander
  */
 function parseArgs() {
-  const args = process.argv.slice(2);
-  const options = {
-    datasetId: null,
-    configFile: null,
-    saveConfigFile: null,
-    sourceHost: null,
-    sourceApiKey: null,
-    destHost: null,
-    destApiKey: null,
-    skipFiles: false,
-    verbose: false,
-    help: false
+  const program = new Command();
+
+  program
+    .name('clone-project')
+    .description('Clone Protobi projects between environments using REST API')
+    .option('--dataset-id <id>', 'Dataset ID to clone (required)')
+    .option('--config <file>', 'Load configuration from JSON file')
+    .option('--save-config <file>', 'Save merged configuration to JSON file')
+    .option('--source-host <url>', 'Source API host (default: https://app.protobi.com)')
+    .option('--source-api-key <key>', 'Source API key (or set PROTOBI_API_KEY_SOURCE)')
+    .option('--dest-host <url>', 'Destination API host (default: http://localhost:5000)')
+    .option('--dest-api-key <key>', 'Destination API key (or set PROTOBI_API_KEY_DEST)')
+    .option('--skip-files', 'Skip data file transfers')
+    .option('-v, --verbose', 'Show detailed progress output')
+    .parse();
+
+  const opts = program.opts();
+
+  return {
+    datasetId: opts.datasetId || null,
+    configFile: opts.config || null,
+    saveConfigFile: opts.saveConfig || null,
+    sourceHost: opts.sourceHost || null,
+    sourceApiKey: opts.sourceApiKey || null,
+    destHost: opts.destHost || null,
+    destApiKey: opts.destApiKey || null,
+    skipFiles: opts.skipFiles || false,
+    verbose: opts.verbose || false,
+    help: opts.help || false
   };
-
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    const next = args[i + 1];
-
-    switch (arg) {
-      case '--dataset-id':
-        options.datasetId = next;
-        i++;
-        break;
-      case '--config':
-        options.configFile = next;
-        i++;
-        break;
-      case '--save-config':
-        options.saveConfigFile = next;
-        i++;
-        break;
-      case '--source-host':
-        options.sourceHost = next;
-        i++;
-        break;
-      case '--source-api-key':
-        options.sourceApiKey = next;
-        i++;
-        break;
-      case '--dest-host':
-        options.destHost = next;
-        i++;
-        break;
-      case '--dest-api-key':
-        options.destApiKey = next;
-        i++;
-        break;
-      case '--skip-files':
-        options.skipFiles = true;
-        break;
-      case '--verbose':
-      case '-v':
-        options.verbose = true;
-        break;
-      case '--help':
-      case '-h':
-        options.help = true;
-        break;
-    }
-  }
-
-  return options;
 }
 
 /**
@@ -113,7 +81,7 @@ async function loadConfig(configPath) {
 async function saveConfig(configPath, config) {
   const content = JSON.stringify(config, null, 2);
   await fs.writeFile(configPath, content, 'utf-8');
-  console.log(chalk.green(`✓ Configuration saved to ${configPath}`));
+  console.log(`✓ Configuration saved to ${configPath}`);
 }
 
 /**
@@ -137,72 +105,15 @@ function mergeConfigs(fileConfig, cliArgs) {
   return config;
 }
 
-/**
- * Print usage information
- */
-function printUsage() {
-  console.log(`
-${chalk.bold('Clone Project Tool')} - Clone Protobi projects between environments using REST API
-
-${chalk.bold('Usage:')}
-  node tools/clone-project.mjs --dataset-id <id> [options]
-  node tools/clone-project.mjs --config <config-file>
-  node tools/clone-project.mjs --dataset-id <id> --save-config <config-file>
-
-${chalk.bold('Required:')}
-  --dataset-id <id>           Dataset ID to clone
-
-${chalk.bold('Options:')}
-  --config <file>             Load configuration from JSON file
-  --save-config <file>        Save merged configuration to JSON file
-  --source-host <url>         Source API host (default: https://app.protobi.com)
-  --source-api-key <key>      Source API key (or set PROTOBI_API_KEY_SOURCE)
-  --dest-host <url>           Destination API host (default: http://localhost:5000)
-  --dest-api-key <key>        Destination API key (or set PROTOBI_API_KEY_DEST)
-  --skip-files                Skip data file transfers
-  --help, -h                  Show this help message
-
-${chalk.bold('Config File Format:')} (see tools/clone-config.example.json)
-  {
-    "datasetId": "67d9963a842478fccb14da41",
-    "source": {
-      "host": "https://globalstrategygroup.protobi.com",
-      "apiKey": "your-source-api-key"
-    },
-    "dest": {
-      "host": "http://localhost:5000",
-      "apiKey": "your-dest-api-key-or-null-for-cookies"
-    },
-    "skipFiles": false
-  }
-
-${chalk.bold('Examples:')}
-  # Clone from production to local with API key
-  node tools/clone-project.mjs --dataset-id 67d9963a842478fccb14da41 \\
-    --source-api-key "cc5e9dba-37f0-48bf-ba41-2ea5953c7805"
-
-  # Use config file
-  node tools/clone-project.mjs --config tools/clone-config.example.json
-
-  # Save configuration for reuse
-  node tools/clone-project.mjs --dataset-id 67d9963a842478fccb14da41 \\
-    --source-host https://globalstrategygroup.protobi.com \\
-    --source-api-key "your-key" \\
-    --save-config my-clone-config.json
-
-  # Clone without data files (faster, metadata only)
-  node tools/clone-project.mjs --config my-clone-config.json --skip-files
-`);
-}
 
 /**
  * Clone dataset metadata
  */
 async function cloneDataset(sourceAPI, destAPI, datasetId, verbose) {
   if (verbose) {
-    console.error(chalk.blue('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
-    console.error(chalk.blue('Step 1: Cloning Dataset Metadata'));
-    console.error(chalk.blue('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
+    console.error('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.error('Step 1: Cloning Dataset Metadata');
+    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
     console.error(`Fetching dataset ${datasetId} from source...`);
   }
 
@@ -219,7 +130,7 @@ async function cloneDataset(sourceAPI, destAPI, datasetId, verbose) {
   }
 
   if (verbose) {
-    console.error(chalk.green(`✓ Found dataset: ${dataset.name || 'Unnamed'}`));
+    console.error(`✓ Found dataset: ${dataset.name || 'Unnamed'}`);
     console.error('Creating dataset on destination...');
   }
 
@@ -232,7 +143,7 @@ async function cloneDataset(sourceAPI, destAPI, datasetId, verbose) {
   }
 
   if (verbose) {
-    console.error(chalk.green(`✓ Dataset created with ID: ${newDataset._id || newDataset.id}`));
+    console.error(`✓ Dataset created with ID: ${newDataset._id || newDataset.id}`);
   }
 
   return {
@@ -247,9 +158,9 @@ async function cloneDataset(sourceAPI, destAPI, datasetId, verbose) {
  */
 async function cloneElements(sourceAPI, destAPI, sourceDatasetId, destDatasetId, verbose) {
   if (verbose) {
-    console.error(chalk.blue('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
-    console.error(chalk.blue('Step 2: Cloning Elements'));
-    console.error(chalk.blue('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
+    console.error('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.error('Step 2: Cloning Elements');
+    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
     console.error('Fetching elements from source...');
   }
 
@@ -263,13 +174,13 @@ async function cloneElements(sourceAPI, destAPI, sourceDatasetId, destDatasetId,
 
   if (!elements || elements.length === 0) {
     if (verbose) {
-      console.error(chalk.yellow('⚠ No elements found'));
+      console.error('⚠ No elements found');
     }
     return;
   }
 
   if (verbose) {
-    console.error(chalk.green(`✓ Found ${elements.length} elements`));
+    console.error(`✓ Found ${elements.length} elements`);
     console.error('Uploading elements to destination...');
   }
 
@@ -281,7 +192,7 @@ async function cloneElements(sourceAPI, destAPI, sourceDatasetId, destDatasetId,
   }
 
   if (verbose) {
-    console.error(chalk.green(`✓ Uploaded ${elements.length} elements`));
+    console.error(`✓ Uploaded ${elements.length} elements`);
   }
 }
 
@@ -290,14 +201,14 @@ async function cloneElements(sourceAPI, destAPI, sourceDatasetId, destDatasetId,
  */
 async function cloneDataTables(sourceAPI, destAPI, sourceDatasetId, destDatasetId, skipFiles, verbose) {
   if (verbose) {
-    console.error(chalk.blue('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
-    console.error(chalk.blue('Step 3: Cloning Data Tables'));
-    console.error(chalk.blue('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
+    console.error('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.error('Step 3: Cloning Data Tables');
+    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
   }
 
   if (skipFiles) {
     if (verbose) {
-      console.error(chalk.yellow('⚠ Skipping file transfers (--skip-files)'));
+      console.error('⚠ Skipping file transfers (--skip-files)');
     }
     return;
   }
@@ -316,13 +227,13 @@ async function cloneDataTables(sourceAPI, destAPI, sourceDatasetId, destDatasetI
 
   if (!tables || tables.length === 0) {
     if (verbose) {
-      console.error(chalk.yellow('⚠ No data tables found'));
+      console.error('⚠ No data tables found');
     }
     return;
   }
 
   if (verbose) {
-    console.error(chalk.green(`✓ Found ${tables.length} data tables`));
+    console.error(`✓ Found ${tables.length} data tables`);
   }
 
   // Clone each table
@@ -349,15 +260,15 @@ async function cloneDataTables(sourceAPI, destAPI, sourceDatasetId, destDatasetI
       }
 
       if (verbose) {
-        console.error(chalk.green(`  ✓ Cloned table ${table.key}`));
+        console.error(`  ✓ Cloned table ${table.key}`);
       }
     } catch (err) {
-      console.error(chalk.red(`  ✗ Failed to clone table ${table.key}: ${err.message}`));
+      console.error(`  ✗ Failed to clone table ${table.key}: ${err.message}`);
     }
   }
 
   if (verbose) {
-    console.error(chalk.green(`\n✓ Cloned ${tables.length} data tables`));
+    console.error(`\n✓ Cloned ${tables.length} data tables`);
   }
 }
 
@@ -365,13 +276,8 @@ async function cloneDataTables(sourceAPI, destAPI, sourceDatasetId, destDatasetI
  * Main execution
  */
 async function main() {
-  // Parse CLI arguments
+  // Parse CLI arguments (commander handles --help automatically)
   const cliArgs = parseArgs();
-
-  if (cliArgs.help) {
-    printUsage();
-    process.exit(0);
-  }
 
   // Load config file if specified
   let fileConfig = null;
@@ -381,11 +287,11 @@ async function main() {
     }
     fileConfig = await loadConfig(cliArgs.configFile);
     if (!fileConfig) {
-      console.error(chalk.red(`✗ Config file not found: ${cliArgs.configFile}`));
+      console.error(`✗ Config file not found: ${cliArgs.configFile}`);
       process.exit(1);
     }
     if (cliArgs.verbose) {
-      console.error(chalk.green('✓ Configuration loaded\n'));
+      console.error('✓ Configuration loaded\n');
     }
   }
 
@@ -394,14 +300,14 @@ async function main() {
 
   // Validate required parameters
   if (!config.datasetId) {
-    console.error(chalk.red('✗ Error: Dataset ID is required'));
-    console.error('\nUse --dataset-id or specify in config file');
-    printUsage();
+    console.error('✗ Error: Dataset ID is required');
+    console.error('Use --dataset-id or specify in config file');
+    console.error('Run with --help for usage information');
     process.exit(1);
   }
 
   if (!config.source.apiKey) {
-    console.error(chalk.red('✗ Error: Source API key is required'));
+    console.error('✗ Error: Source API key is required');
     console.error('\nUse --source-api-key or set PROTOBI_API_KEY_SOURCE');
     process.exit(1);
   }
@@ -413,8 +319,8 @@ async function main() {
 
   // Print configuration if verbose
   if (config.verbose) {
-    console.error(chalk.bold('\n🔄 Protobi Project Clone Tool (REST API)\n'));
-    console.error(chalk.bold('Configuration:'));
+    console.error('\n🔄 Protobi Project Clone Tool (REST API)\n');
+    console.error('Configuration:');
     console.error(`  Dataset ID:    ${config.datasetId}`);
     console.error(`  Source Host:   ${config.source.host}`);
     console.error(`  Source API:    ${config.source.apiKey ? '✓ Configured' : '✗ Missing'}`);
@@ -442,9 +348,9 @@ async function main() {
 
     // Verbose success message to stderr
     if (config.verbose) {
-      console.error(chalk.green.bold('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
-      console.error(chalk.green.bold('✓ Clone Complete!'));
-      console.error(chalk.green.bold('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
+      console.error('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.error('✓ Clone Complete!');
+      console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
       console.error(`Project cloned successfully:`);
       console.error(`  Source:      ${datasetInfo.sourceId}`);
       console.error(`  Destination: ${datasetInfo.destId}`);
@@ -452,10 +358,10 @@ async function main() {
     }
 
   } catch (err) {
-    console.error(chalk.red.bold('\n✗ Clone Failed'));
-    console.error(chalk.red(err.message));
+    console.error('\n✗ Clone Failed');
+    console.error(err.message);
     if (config.verbose && err.stack) {
-      console.error(chalk.gray(err.stack));
+      console.error(err.stack);
     }
     process.exit(1);
   }
@@ -463,6 +369,6 @@ async function main() {
 
 // Run main function
 main().catch(err => {
-  console.error(chalk.red('Unexpected error:'), err);
+  console.error('Unexpected error:', err);
   process.exit(1);
 });
