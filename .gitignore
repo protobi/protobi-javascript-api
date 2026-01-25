@@ -67,3 +67,6 @@ typings/
 .DS_Store
 config.json
 .protobi.json
+work/
+config/*.json
+!config/example.config.json

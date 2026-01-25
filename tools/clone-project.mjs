@@ -12,6 +12,9 @@
  *   node tools/clone-project.mjs --dataset-id <id> --save-config my-clone.json
  */
 
+// Allow self-signed certificates for localhost development
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -34,6 +37,7 @@ function parseArgs() {
     .name('clone-project')
     .description('Clone Protobi projects between environments using REST API')
     .option('--dataset-id <id>', 'Dataset ID to clone (required)')
+    .option('--dest-dataset-id <id>', 'Destination dataset ID (default: same as source)')
     .option('--config <file>', 'Load configuration from JSON file')
     .option('--save-config <file>', 'Save merged configuration to JSON file')
     .option('--source-host <url>', 'Source API host (default: https://app.protobi.com)')
@@ -41,6 +45,7 @@ function parseArgs() {
     .option('--dest-host <url>', 'Destination API host (default: http://localhost:5000)')
     .option('--dest-api-key <key>', 'Destination API key (or set PROTOBI_API_KEY_DEST)')
     .option('--skip-files', 'Skip data file transfers')
+    .option('--data-tables <mode>', 'Which tables to clone: "primary" (default) or "all"', 'primary')
     .option('-v, --verbose', 'Show detailed progress output')
     .parse();
 
@@ -48,6 +53,7 @@ function parseArgs() {
 
   return {
     datasetId: opts.datasetId || null,
+    destDatasetId: opts.destDatasetId || null,
     configFile: opts.config || null,
     saveConfigFile: opts.saveConfig || null,
     sourceHost: opts.sourceHost || null,
@@ -55,6 +61,7 @@ function parseArgs() {
     destHost: opts.destHost || null,
     destApiKey: opts.destApiKey || null,
     skipFiles: opts.skipFiles || false,
+    dataTables: opts.dataTables || 'primary',
     verbose: opts.verbose || false,
     help: opts.help || false
   };
@@ -90,6 +97,7 @@ async function saveConfig(configPath, config) {
 function mergeConfigs(fileConfig, cliArgs) {
   const config = {
     datasetId: cliArgs.datasetId || fileConfig?.datasetId || null,
+    destDatasetId: cliArgs.destDatasetId || fileConfig?.destDatasetId || null,
     source: {
       host: cliArgs.sourceHost || fileConfig?.source?.host || 'https://app.protobi.com',
       apiKey: cliArgs.sourceApiKey || fileConfig?.source?.apiKey || process.env.PROTOBI_API_KEY_SOURCE
@@ -99,6 +107,7 @@ function mergeConfigs(fileConfig, cliArgs) {
       apiKey: cliArgs.destApiKey || fileConfig?.dest?.apiKey || process.env.PROTOBI_API_KEY_DEST || null
     },
     skipFiles: cliArgs.skipFiles || fileConfig?.skipFiles || false,
+    dataTables: cliArgs.dataTables || fileConfig?.dataTables || 'primary',
     verbose: cliArgs.verbose || fileConfig?.verbose || false
   };
 
@@ -109,47 +118,94 @@ function mergeConfigs(fileConfig, cliArgs) {
 /**
  * Clone dataset metadata
  */
-async function cloneDataset(sourceAPI, destAPI, datasetId, verbose) {
+async function cloneDataset(sourceAPI, destAPI, sourceDatasetId, destDatasetId, verbose) {
+  // Use source ID as destination ID if not specified
+  const targetDestId = destDatasetId || sourceDatasetId;
+
   if (verbose) {
     console.error('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.error('Step 1: Cloning Dataset Metadata');
     console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-    console.error(`Fetching dataset ${datasetId} from source...`);
+    console.error(`Fetching dataset ${sourceDatasetId} from source...`);
   }
 
   // Get dataset from source
   let dataset;
   try {
-    dataset = await sourceAPI.getDataset(datasetId);
+    dataset = await sourceAPI.getDataset(sourceDatasetId);
   } catch (err) {
     throw new Error(`Failed to fetch dataset from SOURCE: ${err.message}`);
   }
 
   if (!dataset) {
-    throw new Error(`Dataset ${datasetId} not found on source`);
+    throw new Error(`Dataset ${sourceDatasetId} not found on source`);
   }
 
   if (verbose) {
     console.error(`✓ Found dataset: ${dataset.name || 'Unnamed'}`);
-    console.error('Creating dataset on destination...');
+    if (targetDestId !== sourceDatasetId) {
+      console.error(`✓ Cloning to different destination ID: ${targetDestId}`);
+    }
+    console.error('Creating/updating dataset on destination...');
   }
 
-  // Create dataset on destination
+  // Set the target destination ID
+  dataset._id = targetDestId;
+
+  // Try to update existing dataset first
   let newDataset;
   try {
-    newDataset = await destAPI.createDataset(dataset);
+    if (verbose) {
+      console.error(`Checking if dataset ${targetDestId} exists on destination...`);
+    }
+    newDataset = await destAPI.updateDataset(targetDestId, dataset);
+    if (verbose) {
+      console.error(`✓ Updated existing dataset`);
+    }
   } catch (err) {
-    throw new Error(`Failed to create dataset on DEST: ${err.message}`);
+    // Dataset doesn't exist, try to create it
+    if (err.message.includes('404')) {
+        console.error(`Unable to update Dataset ${targetDestId} on destination`);
+        console.error(err)
+        process.exit(1)
+      if (verbose) {
+        console.error(`Dataset not found, creating new dataset with ID: ${targetDestId}`);
+      }
+      try {
+        // POST to create dataset - include _id in body to request specific ID
+        newDataset = await destAPI.createDataset(dataset);
+        if (verbose) {
+          const createdId = newDataset._id || newDataset.id;
+          if (createdId !== targetDestId) {
+            console.error(`⚠ Warning: Server created dataset with different ID`);
+            console.error(`  Requested: ${targetDestId}`);
+            console.error(`  Created:   ${createdId}`);
+            console.error(`  This may indicate the server doesn't support custom IDs via POST`);
+          }
+        }
+      } catch (createErr) {
+        throw new Error(`Failed to create dataset on DEST: ${createErr.message}`);
+      }
+    } else {
+      throw new Error(`Failed to update dataset on DEST: ${err.message}`);
+    }
   }
 
+  // Use the actual ID returned from the server (may differ from requested ID)
+  const actualDestId = newDataset._id || newDataset.id || targetDestId;
+
   if (verbose) {
-    console.error(`✓ Dataset created with ID: ${newDataset._id || newDataset.id}`);
+    console.error(`✓ Dataset created/updated with ID: ${actualDestId}`);
+    if (actualDestId !== targetDestId) {
+      console.error(`⚠ Note: Server assigned different ID (requested: ${targetDestId}, actual: ${actualDestId})`);
+    }
   }
 
   return {
-    sourceId: datasetId,
-    destId: newDataset._id || newDataset.id,
-    name: dataset.name
+    sourceId: sourceDatasetId,
+    destId: actualDestId,  // Use actual ID assigned by destination server
+    name: dataset.name,
+    dataset: dataset  // Include full dataset object for primary table info
   };
 }
 
@@ -199,7 +255,7 @@ async function cloneElements(sourceAPI, destAPI, sourceDatasetId, destDatasetId,
 /**
  * Clone data tables
  */
-async function cloneDataTables(sourceAPI, destAPI, sourceDatasetId, destDatasetId, skipFiles, verbose) {
+async function cloneDataTables(sourceAPI, destAPI, sourceDatasetId, destDatasetId, dataset, dataTables, skipFiles, verbose) {
   if (verbose) {
     console.error('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.error('Step 3: Cloning Data Tables');
@@ -236,6 +292,19 @@ async function cloneDataTables(sourceAPI, destAPI, sourceDatasetId, destDatasetI
     console.error(`✓ Found ${tables.length} data tables`);
   }
 
+  // Filter tables based on mode
+  if (dataTables === 'primary') {
+    const primaryTable = dataset.primary || dataset.primary_table;
+    if (primaryTable) {
+      tables = tables.filter(t => t.key === primaryTable);
+      if (verbose) {
+        console.error(`✓ Filtered to primary table: ${primaryTable}`);
+      }
+    } else if (verbose) {
+      console.error('⚠ No primary table specified, cloning all tables');
+    }
+  }
+
   // Clone each table
   for (let i = 0; i < tables.length; i++) {
     const table = tables[i];
@@ -244,16 +313,49 @@ async function cloneDataTables(sourceAPI, destAPI, sourceDatasetId, destDatasetI
     }
 
     try {
-      // Download data from source
+      // Step 1: Get full table definition from source (includes fn, properties, etc.)
+      let fullTableDef;
+      try {
+        if (verbose) {
+          console.error(`  → Getting full table definition from source`);
+        }
+        fullTableDef = await sourceAPI.getDataTable(sourceDatasetId, table.key);
+        if (verbose) {
+          console.error(`  → Got definition: type=${fullTableDef.type}, has fn=${!!fullTableDef.fn}, has properties=${!!fullTableDef.properties}`);
+        }
+      } catch (err) {
+        throw new Error(`Failed to get table definition from SOURCE: ${err.message}`);
+      }
+
+      // Step 2: Create/update table definition on destination (preserves type, fn, properties, etc.)
+      try {
+        if (verbose) {
+          console.error(`  → Putting table definition to destination`);
+        }
+        const putResult = await destAPI.putDataTable(destDatasetId, table.key, fullTableDef);
+        if (verbose) {
+          console.error(`  → Created table: type=${putResult.type}, has fn=${!!putResult.fn}`);
+        }
+      } catch (err) {
+        throw new Error(`Failed to create table definition on DEST: ${err.message}`);
+      }
+
+      // Step 3: Download data from source
       let data;
       try {
+        if (verbose) {
+          console.error(`  → Downloading CSV data`);
+        }
         data = await sourceAPI.downloadData(sourceDatasetId, table.key);
       } catch (err) {
         throw new Error(`Failed to download from SOURCE: ${err.message}`);
       }
 
-      // Upload data to destination
+      // Step 4: Upload data to destination
       try {
+        if (verbose) {
+          console.error(`  → Uploading CSV data`);
+        }
         await destAPI.uploadCsvText(data, destDatasetId, table.key, table.filename);
       } catch (err) {
         throw new Error(`Failed to upload to DEST: ${err.message}`);
@@ -321,12 +423,14 @@ async function main() {
   if (config.verbose) {
     console.error('\n🔄 Protobi Project Clone Tool (REST API)\n');
     console.error('Configuration:');
-    console.error(`  Dataset ID:    ${config.datasetId}`);
+    console.error(`  Source ID:     ${config.datasetId}`);
+    console.error(`  Dest ID:       ${config.destDatasetId || config.datasetId + ' (same)'}`);
     console.error(`  Source Host:   ${config.source.host}`);
     console.error(`  Source API:    ${config.source.apiKey ? '✓ Configured' : '✗ Missing'}`);
     console.error(`  Dest Host:     ${config.dest.host}`);
     console.error(`  Dest API:      ${config.dest.apiKey ? '✓ Configured' : 'None (cookies)'}`);
-    console.error(`  Skip Files:    ${config.skipFiles}\n`);
+    console.error(`  Skip Files:    ${config.skipFiles}`);
+    console.error(`  Data Tables:   ${config.dataTables}\n`);
   }
 
   // Initialize API clients
@@ -335,13 +439,13 @@ async function main() {
 
   try {
     // Clone dataset
-    const datasetInfo = await cloneDataset(sourceAPI, destAPI, config.datasetId, config.verbose);
+    const datasetInfo = await cloneDataset(sourceAPI, destAPI, config.datasetId, config.destDatasetId, config.verbose);
 
     // Clone elements
     await cloneElements(sourceAPI, destAPI, datasetInfo.sourceId, datasetInfo.destId, config.verbose);
 
     // Clone data tables
-    await cloneDataTables(sourceAPI, destAPI, datasetInfo.sourceId, datasetInfo.destId, config.skipFiles, config.verbose);
+    await cloneDataTables(sourceAPI, destAPI, datasetInfo.sourceId, datasetInfo.destId, datasetInfo.dataset, config.dataTables, config.skipFiles, config.verbose);
 
     // Success - output destination ID to stdout (for piping/scripting)
     console.log(datasetInfo.destId);
