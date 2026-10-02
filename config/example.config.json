@@ -1,0 +1,15 @@
+{
+  "datasetId": "your-dataset-id-here",
+  "source": {
+    "host": "https://your-source-host.protobi.com",
+    "apiKey": "your-source-api-key-here",
+    "comment": "API key for source environment - get from source admin panel"
+  },
+  "dest": {
+    "host": "http://localhost:5000",
+    "apiKey": null,
+    "comment": "Set to null to use browser cookies, or provide API key for automated access"
+  },
+  "skipFiles": false,
+  "comment": "Set skipFiles to true to clone only metadata (dataset + elements) without data files"
+}
