@@ -12,7 +12,7 @@
  */
 
 var https = require('https');
-var nodeFetch = require('node-fetch'); // For FormData uploads
+var fetch = require('node-fetch'); // For FormData uploads
 var CSV = require('csv')
 var Elements = require('./elements')
 
@@ -21,8 +21,173 @@ var httpsAgent = new https.Agent({
   rejectUnauthorized: false
 });
 
+// Normalize transport failures once for all REST methods. HTTP response and
+// JSON parsing errors are handled by the methods themselves.
+function nodeFetch(url, options) {
+  return fetch(url, options).catch(function(err) {
+    if (err.type !== 'system' && err.type !== 'request-timeout') throw err;
 
-function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
+    var server = new URL(url).origin;
+    var code = err.code || err.errno;
+    var reasons = {
+      ECONNREFUSED: 'Connection refused. Check that the server is running and the host and port are correct.',
+      ENOTFOUND: 'Server hostname could not be resolved.',
+      EAI_AGAIN: 'Server hostname could not be resolved temporarily.',
+      ETIMEDOUT: 'Connection timed out.',
+      ECONNRESET: 'Connection was reset by the server.',
+      EHOSTUNREACH: 'Server host is unreachable.',
+      ENETUNREACH: 'Network is unreachable.',
+      EPERM: 'Connection blocked by system permissions.',
+      EACCES: 'Connection blocked by system permissions.'
+    };
+    var reason = reasons[code] || (err.type === 'request-timeout'
+      ? 'Connection timed out.'
+      : 'The network request failed. Check server availability and connection settings.');
+    // Do not include the fetch message: its request URL can contain an API key.
+    var error = new Error('Unable to connect to server ' + server +
+      (code ? ' [' + code + ']' : '') + ': ' + reason);
+    error.code = err.code;
+    error.errno = err.errno;
+    error.type = err.type;
+    throw error;
+  });
+}
+
+
+function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY, options) {
+  options = options || {};
+  var DEBUG_MODE = options.debug || false;
+  var TASK_POLL_INTERVAL_MS = options.taskPollIntervalMs || 1000;
+  var TASK_TIMEOUT_MS = options.taskTimeoutMs || 30 * 60 * 1000;
+  var TASK_POLL_MAX_ERRORS = options.taskPollMaxErrors || 5;
+
+  function describeRequestError(err) {
+    var message = err && err.message ? err.message : String(err || 'Unknown request error');
+    var code = err && (err.code || err.errno || err.type);
+    return code && message.indexOf(String(code)) === -1
+      ? message + ' [' + code + ']'
+      : message;
+  }
+
+  /**
+   * Wait for an asynchronous server task to finish.
+   *
+   * Upload endpoints return a task descriptor before storage/processing has
+   * completed. Treating that initial HTTP 200 as success hides failures such as
+   * rejected S3 writes.
+   */
+  function waitForTask(task, callback) {
+    if (!task || !task.id || task.complete !== false) {
+      if (task && task.error) {
+        return callback(new Error('Task ' + (task.id || 'unknown') + ' failed: ' + task.error));
+      }
+      return callback(null, task);
+    }
+
+    var startedAt = Date.now();
+    var consecutivePollErrors = 0;
+
+    function poll() {
+      if (Date.now() - startedAt >= TASK_TIMEOUT_MS) {
+        return callback(new Error('Task ' + task.id + ' did not complete within ' + Math.round(TASK_TIMEOUT_MS / 1000) + ' seconds'));
+      }
+
+      var url = PROTOBI_API_URL + '/api/v3/tasks/' + encodeURIComponent(task.id) + '/check';
+      nodeFetch(url, {
+        method: 'GET',
+        headers: {
+          'x-api-key': PROTOBI_API_KEY
+        },
+        agent: httpsAgent
+      })
+      .then(function(response) {
+        if (!response.ok) {
+          return response.text().then(function(text) {
+            throw new Error('HTTP ' + response.status + ': ' + text);
+          });
+        }
+        return response.json();
+      })
+      .then(function(currentTask) {
+        consecutivePollErrors = 0;
+        if (!currentTask) {
+          return callback(new Error('Task ' + task.id + ' was not found while waiting for completion'));
+        }
+        if (currentTask.complete) {
+          if (currentTask.error) {
+            return callback(new Error('Task ' + task.id + ' failed: ' + currentTask.error));
+          }
+          return callback(null, currentTask);
+        }
+
+        var serverDelay = Number(currentTask.delay);
+        var delay = Number.isFinite(serverDelay) && serverDelay > 0
+          ? serverDelay
+          : TASK_POLL_INTERVAL_MS;
+        setTimeout(poll, delay);
+      })
+      .catch(function(err) {
+        consecutivePollErrors++;
+        if (consecutivePollErrors >= TASK_POLL_MAX_ERRORS || Date.now() - startedAt >= TASK_TIMEOUT_MS) {
+          return callback(new Error(
+            'Unable to check task ' + task.id + ' after ' + consecutivePollErrors +
+            ' consecutive attempts: ' + describeRequestError(err)
+          ));
+        }
+
+        var retryDelay = Math.min(
+          TASK_POLL_INTERVAL_MS * Math.pow(2, consecutivePollErrors - 1),
+          10000
+        );
+        console.error(
+          '  ⚠ Unable to check task ' + task.id + ': ' + describeRequestError(err) +
+          '; retrying in ' + Math.round(retryDelay / 1000) + ' seconds (' +
+          consecutivePollErrors + '/' + TASK_POLL_MAX_ERRORS + ')'
+        );
+        setTimeout(poll, retryDelay);
+      });
+    }
+
+    setTimeout(poll, TASK_POLL_INTERVAL_MS);
+  }
+
+  function getDownloadFilename(response, fallback) {
+    var disposition = response.headers.get('content-disposition') || '';
+    var utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+    var basicMatch = disposition.match(/filename\s*=\s*"?([^";]+)"?/i);
+    var encoded = utf8Match && utf8Match[1];
+    if (encoded) {
+      try {
+        return decodeURIComponent(encoded);
+      } catch (err) {
+        return encoded;
+      }
+    }
+    return basicMatch ? basicMatch[1].trim() : fallback;
+  }
+
+  function debugFetch(url, requestOptions) {
+    if (DEBUG_MODE) {
+      var method = requestOptions.method || 'GET';
+      console.error('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.error('DEBUG: First API Call (NOT EXECUTED)');
+      console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.error(`Method: ${method}`);
+      console.error(`URL: ${url}`);
+      if (requestOptions.headers) {
+        console.error('Headers:', JSON.stringify(requestOptions.headers, null, 2));
+      }
+      if (requestOptions.body) {
+        var bodyPreview = typeof requestOptions.body === 'string'
+          ? requestOptions.body.substring(0, 500)
+          : (requestOptions.body.constructor.name || 'Unknown');
+        console.error('Body:', bodyPreview);
+      }
+      console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+      process.exit(0);
+    }
+    return nodeFetch(url, requestOptions);
+  }
 
   return {
 
@@ -56,7 +221,7 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
       var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId + "/element";
       url += "?apiKey=" + PROTOBI_API_KEY;
 
-      fetch(url, {
+      debugFetch( url, {
         method: "POST",
         headers: {
           'Content-Type': 'application/json',
@@ -66,7 +231,6 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
         agent: httpsAgent
       })
       .then(function(response) {
-        console.log(response.status);
         if (!response.ok) {
           throw new Error('HTTP ' + response.status + ': ' + response.statusText);
         }
@@ -80,6 +244,308 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
       });
     },
 
+
+    /**
+     * Retrieve list of all datasets (admin only)
+     * @param callback      function(err, datasets)
+     */
+    getDatasets: function (callback) {
+      var self = this;
+      if (!callback) {
+        return new Promise(function(resolve, reject) {
+          self.getDatasets(function (err, result) {
+            if (err) reject(err)
+            else resolve(result)
+          })
+        })
+      }
+      var url = PROTOBI_API_URL + "/api/v3/dataset";
+      url += "?apiKey=" + PROTOBI_API_KEY;
+
+      nodeFetch(url, {
+        method: "GET",
+        headers: {
+          'x-api-key': PROTOBI_API_KEY
+        },
+        agent: httpsAgent
+      })
+      .then(function(response) {
+        if (!response.ok) {
+          throw new Error('HTTP ' + response.status + ': ' + response.statusText);
+        }
+        return response.json();
+      })
+      .then(function(body) {
+        callback(null, body);
+      })
+      .catch(function(err) {
+        callback(err);
+      });
+    },
+
+    /**
+     * Retrieve dataset metadata
+     * @param datasetId     Id of existing project
+     * @param callback      function(err, dataset)
+     */
+    getDataset: function (datasetId, callback) {
+      var self = this;
+      if (!callback) {
+        return new Promise(function(resolve, reject) {
+          self.getDataset(datasetId, function (err, result) {
+            if (err) reject(err)
+            else resolve(result)
+          })
+        })
+      }
+      var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId;
+      url += "?apiKey=" + PROTOBI_API_KEY;
+
+      nodeFetch(url, {
+        method: "GET",
+        headers: {
+          'x-api-key': PROTOBI_API_KEY
+        },
+        agent: httpsAgent
+      })
+      .then(function(response) {
+        if (!response.ok) {
+          throw new Error('HTTP ' + response.status + ': ' + response.statusText);
+        }
+        return response.json();
+      })
+      .then(function(body) {
+        callback(null, body);
+      })
+      .catch(function(err) {
+        callback(err);
+      });
+    },
+
+    /**
+     * Retrieve list of data tables (csvtables) for a dataset
+     * @param datasetId     Id of existing project
+     * @param callback      function(err, tables)
+     */
+    getDataTables: function (datasetId, callback) {
+      var self = this;
+      if (!callback) {
+        return new Promise(function(resolve, reject) {
+          self.getDataTables(datasetId, function (err, result) {
+            if (err) reject(err)
+            else resolve(result)
+          })
+        })
+      }
+      var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId + "/tables";
+      url += "?apiKey=" + PROTOBI_API_KEY;
+
+      nodeFetch(url, {
+        method: "GET",
+        headers: {
+          'x-api-key': PROTOBI_API_KEY
+        },
+        agent: httpsAgent
+      })
+      .then(function(response) {
+        if (!response.ok) {
+          throw new Error('HTTP ' + response.status + ': ' + response.statusText);
+        }
+        return response.json();
+      })
+      .then(function(body) {
+        callback(null, body);
+      })
+      .catch(function(err) {
+        callback(err);
+      });
+    },
+
+    /**
+     * Download raw CSV data for a table (for cloning)
+     * @param datasetId     Id of existing project
+     * @param dataKey       Key of data table to download
+     * @param callback      function(err, csvText)
+     */
+    downloadData: function (datasetId, dataKey, callback) {
+      var self = this;
+      if (!callback) {
+        return new Promise(function(resolve, reject) {
+          self.downloadData(datasetId, dataKey, function (err, result) {
+            if (err) reject(err)
+            else resolve(result)
+          })
+        })
+      }
+      var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId + "/data/" + dataKey + "/csv";
+      url += "?apiKey=" + PROTOBI_API_KEY;
+
+      nodeFetch(url, {
+        method: "GET",
+        headers: {
+          'x-api-key': PROTOBI_API_KEY
+        },
+        agent: httpsAgent
+      })
+      .then(function(response) {
+        if (!response.ok) {
+          var err = new Error('HTTP ' + response.status + ': ' + response.statusText);
+          err.status = response.status;
+          throw err;
+        }
+        return response.text();
+      })
+      .then(function(csvText) {
+        callback(null, csvText);
+      })
+      .catch(function(err) {
+        callback(err);
+      });
+    },
+
+    /**
+     * Download the originally uploaded binary for a table.
+     * @param datasetId       Id of source project
+     * @param dataKey         Key of data table
+     * @param fallbackName    Filename to use if the response omits one
+     * @param callback        function(err, { data, filename, contentType })
+     */
+    downloadOriginalData: function (datasetId, dataKey, fallbackName, callback) {
+      var self = this;
+      if (!callback) {
+        return new Promise(function(resolve, reject) {
+          self.downloadOriginalData(datasetId, dataKey, fallbackName, function (err, result) {
+            if (err) reject(err)
+            else resolve(result)
+          })
+        })
+      }
+
+      var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId + "/data/" + encodeURIComponent(dataKey) + "/raw";
+      url += "?apiKey=" + PROTOBI_API_KEY;
+
+      nodeFetch(url, {
+        method: "GET",
+        headers: {
+          'x-api-key': PROTOBI_API_KEY
+        },
+        agent: httpsAgent
+      })
+      .then(function(response) {
+        if (!response.ok) {
+          return response.text().then(function(text) {
+            var err = new Error('HTTP ' + response.status + ': ' + text);
+            err.status = response.status;
+            throw err;
+          });
+        }
+        return response.buffer().then(function(data) {
+          return {
+            data: data,
+            filename: getDownloadFilename(response, fallbackName || dataKey),
+            contentType: (response.headers.get('content-type') || 'application/octet-stream').split(';')[0]
+          };
+        });
+      })
+      .then(function(file) {
+        callback(null, file);
+      })
+      .catch(function(err) {
+        callback(err);
+      });
+    },
+
+    /**
+     * Upload a binary file and wait for the server task to complete.
+     */
+    uploadFile: function (fileData, datasetId, dataKey, filename, contentType, options, callback) {
+      var self = this;
+      if (typeof options === 'function') {
+        callback = options;
+        options = {};
+      }
+      options = options || {};
+      if (!callback) {
+        return new Promise(function(resolve, reject) {
+          self.uploadFile(fileData, datasetId, dataKey, filename, contentType, options, function (err, result) {
+            if (err) reject(err)
+            else resolve(result)
+          })
+        })
+      }
+
+      var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId + "/data/" + dataKey;
+      url += "?apiKey=" + PROTOBI_API_KEY;
+
+      var FormData = require('form-data');
+      var form = new FormData();
+      if (options.forceStreaming) {
+        form.append('useStreaming', 'true');
+      }
+      form.append('file', Buffer.isBuffer(fileData) ? fileData : Buffer.from(fileData), {
+        filename: filename || dataKey,
+        contentType: contentType || 'application/octet-stream'
+      });
+
+      nodeFetch(url, {
+        method: "POST",
+        headers: {
+          'x-api-key': PROTOBI_API_KEY,
+          ...form.getHeaders()
+        },
+        body: form,
+        agent: httpsAgent
+      })
+      .then(function(response) {
+        if (!response.ok) {
+          return response.text().then(function(text) {
+            throw new Error('HTTP ' + response.status + ': ' + text);
+          });
+        }
+        return response.json();
+      })
+      .then(function(body) {
+        waitForTask(body, callback);
+      })
+      .catch(function(err) {
+        callback(err);
+      });
+    },
+
+    /**
+     * Upload raw CSV text for a table (for cloning)
+     * @param csvText       CSV text data
+     * @param datasetId     Id of destination project
+     * @param dataKey       Key of data table
+     * @param filename      Original filename
+     * @param options       Optional upload options ({ forceStreaming: true })
+     * @param callback      function(err, result)
+     */
+    uploadCsvText: function (csvText, datasetId, dataKey, filename, options, callback) {
+      var self = this;
+      if (typeof options === 'function') {
+        callback = options;
+        options = {};
+      }
+      options = options || {};
+      if (!callback) {
+        return new Promise(function(resolve, reject) {
+          self.uploadCsvText(csvText, datasetId, dataKey, filename, options, function (err, result) {
+            if (err) reject(err)
+            else resolve(result)
+          })
+        })
+      }
+      self.uploadFile(
+        Buffer.from(csvText, 'utf-8'),
+        datasetId,
+        dataKey,
+        filename || dataKey + '.csv',
+        'text/csv',
+        options,
+        callback
+      );
+    },
 
     /**
      * Retrieve project configuration as an array of elements
@@ -99,7 +565,7 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
       var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId + "/element";
       url += "?apiKey=" + PROTOBI_API_KEY;
 
-      fetch(url, {
+      nodeFetch(url, {
         method: "GET",
         headers: {
           'x-api-key': PROTOBI_API_KEY
@@ -151,7 +617,7 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
       var checkUrl = PROTOBI_API_URL + "/api/v3/tasks/" + taskId + "/check?apiKey=" + PROTOBI_API_KEY;
 
       function poll() {
-        fetch(checkUrl, {
+        nodeFetch(checkUrl, {
           method: "GET",
           headers: {
             'x-api-key': PROTOBI_API_KEY
@@ -203,7 +669,6 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
       }
       var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId + "/data/" + dataKey;
       url += "?apiKey=" + PROTOBI_API_KEY;
-      console.log(url)
 
       // Create FormData for multipart upload
       var FormData = require('form-data');
@@ -262,7 +727,7 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
       var headers = options.headers || {};
       // fetch handles gzip automatically via Accept-Encoding
 
-      fetch(url, {
+      nodeFetch(url, {
         method: "GET",
         headers: headers,
         agent: httpsAgent
@@ -365,7 +830,7 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
       var url = PROTOBI_API_URL + "/api/v3/dataset";
       url += "?apiKey=" + PROTOBI_API_KEY;
 
-      fetch(url, {
+      nodeFetch(url, {
         method: "GET",
         headers: {
           'x-api-key': PROTOBI_API_KEY
@@ -389,46 +854,102 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
     },
 
     /**
-     * Create a new dataset from a file
-     * NOTE: Currently uses /v3/new/datafile/ which will soon require session auth.
-     * TODO: Update to use /api/v3 endpoint when available
-     * @param file      File path or Buffer
-     * @param options   {name, description} - optional metadata
-     * @param callback  function(err, dataset)
+     * Create a new dataset (metadata only, no data files)
+     *
+     * IMPORTANT: This method creates an EMPTY dataset with metadata only.
+     * To upload data files to an existing dataset, use uploadData() instead.
+     *
+     * @param datasetObject   Dataset metadata object {name, description, etc}
+     * @param options         Optional parameters (reserved for future use)
+     * @param callback        function(err, dataset)
      */
-    createDataset: function (file, options, callback) {
+    createDataset: function (datasetObject, options, callback) {
       var self = this;
       if (typeof options === 'function') {
         callback = options
         options = {}
       }
+      options = options || {}
+
+      // Preserve the previous file-based signature while allowing the clone
+      // tool to pass a plain metadata object.
+      if (typeof datasetObject === 'string' ||
+          Buffer.isBuffer(datasetObject) ||
+          (datasetObject && typeof datasetObject.pipe === 'function')) {
+        return self.createDatasetFromFile(datasetObject, options, callback)
+      }
       if (!callback) {
         return new Promise(function(resolve, reject) {
-          self.createDataset(file, options, function (err, result) {
+          self.createDataset(datasetObject, options, function (err, result) {
             if (err) reject(err)
             else resolve(result)
           })
         })
       }
-      var url = PROTOBI_API_URL + "/v3/new/datafile/";
+
+      // Only support dataset objects - use API endpoint
+      var url = PROTOBI_API_URL + "/api/v3/dataset";
       url += "?apiKey=" + PROTOBI_API_KEY;
 
+      nodeFetch(url, {
+        method: "POST",
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': PROTOBI_API_KEY
+        },
+        body: JSON.stringify(datasetObject),
+        agent: httpsAgent
+      })
+      .then(function(response) {
+        if (response.status !== 200) {
+          return response.text().then(function(text) {
+            throw new Error('HTTP ' + response.status + ': ' + text);
+          });
+        }
+        return response.json();
+      })
+      .then(function(body) {
+        callback(null, body);
+      })
+      .catch(function(err) {
+        callback(err);
+      });
+    },
+
+    /**
+     * Create a new dataset from a file.
+     * @param file      File path, Buffer, or readable stream
+     * @param options   {name, description, filename, contentType}
+     * @param callback  function(err, dataset)
+     */
+    createDatasetFromFile: function (file, options, callback) {
+      var self = this;
+      if (typeof options === 'function') {
+        callback = options;
+        options = {};
+      }
+      options = options || {};
+      if (!callback) {
+        return new Promise(function(resolve, reject) {
+          self.createDatasetFromFile(file, options, function (err, result) {
+            if (err) reject(err);
+            else resolve(result);
+          });
+        });
+      }
+
+      var url = PROTOBI_API_URL + "/v3/new/datafile/?apiKey=" + PROTOBI_API_KEY;
       var FormData = require('form-data');
       var form = new FormData();
 
-      // Add file
       if (typeof file === 'string') {
-        // File path
         form.append('file', require('fs').createReadStream(file));
       } else {
-        // Buffer or stream
         form.append('file', file, {
           filename: options.filename || 'data.csv',
           contentType: options.contentType || 'text/csv'
         });
       }
-
-      // Add optional metadata
       if (options.name) form.append('name', options.name);
       if (options.description) form.append('description', options.description);
 
@@ -439,12 +960,66 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
         agent: httpsAgent
       })
       .then(function(response) {
-        if (response.status !== 200) {
+        if (!response.ok) {
           return response.text().then(function(text) {
             throw new Error('HTTP ' + response.status + ': ' + text);
           });
         }
-        return response.json();  // Changed from text() to json() to handle task response
+        return response.json();
+      })
+      .then(function(body) {
+        callback(null, body);
+      })
+      .catch(function(err) {
+        callback(err);
+      });
+    },
+
+    /**
+     * Update or create a dataset with a specific ID (for cloning)
+     *
+     * Uses PUT to either update existing dataset or create new one with specified ID.
+     * This preserves the dataset ID when cloning between environments.
+     *
+     * @param datasetId         The dataset ID to use
+     * @param datasetObject     Dataset metadata object {name, description, etc}
+     * @param options           Optional parameters (reserved for future use)
+     * @param callback          function(err, dataset)
+     */
+    updateDataset: function (datasetId, datasetObject, options, callback) {
+      var self = this;
+      if (typeof options === 'function') {
+        callback = options
+        options = {}
+      }
+      if (!callback) {
+        return new Promise(function(resolve, reject) {
+          self.updateDataset(datasetId, datasetObject, options, function (err, result) {
+            if (err) reject(err)
+            else resolve(result)
+          })
+        })
+      }
+
+      var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId;
+      url += "?apiKey=" + PROTOBI_API_KEY;
+
+      nodeFetch(url, {
+        method: "PUT",
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': PROTOBI_API_KEY
+        },
+        body: JSON.stringify(datasetObject),
+        agent: httpsAgent
+      })
+      .then(function(response) {
+        if (!response.ok) {
+          return response.text().then(function(text) {
+            throw new Error('HTTP ' + response.status + ': ' + text);
+          });
+        }
+        return response.json();
       })
       .then(function(body) {
         callback(null, body);
@@ -472,7 +1047,7 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
       var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId;
       url += "?apiKey=" + PROTOBI_API_KEY;
 
-      fetch(url, {
+      nodeFetch(url, {
         method: "DELETE",
         headers: {
           'x-api-key': PROTOBI_API_KEY
@@ -514,7 +1089,7 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
       var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId + "/data/" + dataKey;
       url += "?apiKey=" + PROTOBI_API_KEY;
 
-      fetch(url, {
+      nodeFetch(url, {
         method: "DELETE",
         headers: {
           'x-api-key': PROTOBI_API_KEY
@@ -523,6 +1098,139 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
       })
       .then(function(response) {
         if (response.status !== 200) {
+          return response.text().then(function(text) {
+            throw new Error('HTTP ' + response.status + ': ' + text);
+          });
+        }
+        return response.json();
+      })
+      .then(function(body) {
+        callback(null, body);
+      })
+      .catch(function(err) {
+        callback(err);
+      });
+    },
+
+    /**
+     * Get full data table definition (including fn, properties, etc.)
+     * @param datasetId  Dataset ID
+     * @param dataKey    Table key
+     * @param callback   function(err, table)
+     */
+    getDataTable: function (datasetId, dataKey, callback) {
+      var self = this;
+      if (!callback) {
+        return new Promise(function(resolve, reject) {
+          self.getDataTable(datasetId, dataKey, function (err, result) {
+            if (err) reject(err)
+            else resolve(result)
+          })
+        })
+      }
+      var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId + "/data/" + dataKey;
+      url += "?apiKey=" + PROTOBI_API_KEY;
+
+      nodeFetch(url, {
+        method: "GET",
+        headers: {
+          'x-api-key': PROTOBI_API_KEY
+        },
+        agent: httpsAgent
+      })
+      .then(function(response) {
+        if (!response.ok) {
+          return response.text().then(function(text) {
+            throw new Error('HTTP ' + response.status + ': ' + text);
+          });
+        }
+        return response.json();
+      })
+      .then(function(body) {
+        callback(null, body);
+      })
+      .catch(function(err) {
+        callback(err);
+      });
+    },
+
+    /**
+     * Create or update a data table definition
+     * @param datasetId    Dataset ID
+     * @param dataKey      Table key
+     * @param tableObject  Table definition object (with type, key, filename, fn, properties, etc.)
+     * @param callback     function(err, table)
+     */
+    putDataTable: function (datasetId, dataKey, tableObject, callback) {
+      var self = this;
+      if (!callback) {
+        return new Promise(function(resolve, reject) {
+          self.putDataTable(datasetId, dataKey, tableObject, function (err, result) {
+            if (err) reject(err)
+            else resolve(result)
+          })
+        })
+      }
+      var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId + "/data/" + dataKey;
+      url += "?apiKey=" + PROTOBI_API_KEY;
+
+      nodeFetch(url, {
+        method: "PUT",
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': PROTOBI_API_KEY
+        },
+        body: JSON.stringify(tableObject),
+        agent: httpsAgent
+      })
+      .then(function(response) {
+        if (!response.ok) {
+          return response.text().then(function(text) {
+            throw new Error('HTTP ' + response.status + ': ' + text);
+          });
+        }
+        return response.json();
+      })
+      .then(function(body) {
+        callback(null, body);
+      })
+      .catch(function(err) {
+        callback(err);
+      });
+    },
+
+    /**
+     * Update the fn (JavaScript/SQL code) for a data process table
+     * @param datasetId  Dataset ID
+     * @param dataKey    Table key
+     * @param fn         JavaScript or SQL code string
+     * @param callback   function(err, table)
+     */
+    putDataTableFn: function (datasetId, dataKey, fn, callback) {
+      var self = this;
+      if (!callback) {
+        return new Promise(function(resolve, reject) {
+          self.putDataTableFn(datasetId, dataKey, fn, function (err, result) {
+            if (err) reject(err)
+            else resolve(result)
+          })
+        })
+      }
+      // Use the admin endpoint for setting fn
+      var url = PROTOBI_API_URL + "/v3/datasets/" + datasetId + "/admin/data/" + dataKey + "/fn";
+      url += "?apiKey=" + PROTOBI_API_KEY;
+
+      nodeFetch(url, {
+        method: "PUT",
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': PROTOBI_API_KEY
+        },
+        body: JSON.stringify({fn: fn}),
+        agent: httpsAgent
+      })
+      .then(function(response) {
+        if (!response.ok) {
           return response.text().then(function(text) {
             throw new Error('HTTP ' + response.status + ': ' + text);
           });
@@ -557,7 +1265,7 @@ function ProtobiAPI(PROTOBI_API_URL, PROTOBI_API_KEY) {
       var url = PROTOBI_API_URL + "/api/v3/dataset/" + datasetId;
       url += "?apiKey=" + PROTOBI_API_KEY;
 
-      fetch(url, {
+      nodeFetch(url, {
         method: "GET",
         headers: {
           'x-api-key': PROTOBI_API_KEY
